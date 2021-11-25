@@ -1,4 +1,4 @@
-//barra de upload, excluir e renomear, abrir o arquivo a partir do duplo click
+// abrir o arquivo a partir do duplo click e enviar no banco de dados, alem de mostrar os arquivos
 class DropBoxController {
 
     constructor(){
@@ -64,8 +64,6 @@ class DropBoxController {
 
     }
 
-    
-
     initEvents(){
 
         this.btnNewFolder.addEventListener('click', e=>{
@@ -90,19 +88,18 @@ class DropBoxController {
 
             this.removeTask().then(responses =>{
 
-                responses.forEach(responses =>{
+                responses.forEach(response =>{
 
-                    if(responses.fields.key){
+                    if(response.fields.key){
 
-                        this.getFirebaseRef().child(responses.fields.key).remove()
+                        this.getFirebaseRef().child(response.fields.key).remove()
                     }
 
                 })
 
 
             }).catch( err =>{
-                
-                    console.err(err)
+                    console.error(err)
 
             })
 
@@ -126,7 +123,7 @@ class DropBoxController {
 
         })
 
-        this.listFilesEl.addEventListener('selectionchange', ()=>{
+        this.listFilesEl.addEventListener('selectionchange', e=>{
 
             switch(this.getSelection().length){
 
@@ -158,17 +155,18 @@ class DropBoxController {
 
             this.btnSendFileEl.disabled = true
 
+            
             this.uploadTask(event.target.files).then(responses => {
+                
+                responses.forEach(resp => {
 
-                responses.forEach( resp => {
-                    
                     this.getFirebaseRef().push().set({
-                        name:resp.name,
-                        type:resp.contentType,
+                        originalFilename: resp.name,
+                        mimetype: resp.contentType,
                         path: resp.downloadURLs[0],
                         size: resp.size
                     })
-
+                    
                 })
 
                 this.uploadComplete()
@@ -177,51 +175,55 @@ class DropBoxController {
 
                 this.uploadComplete()
                 console.log(err)
-
             })
 
             this.modalShow()
             
-
         })
     }
 
-    removeFolderTask(ref, name){
+    removeFolderTask(ref, name, key){
 
         return new Promise((resolve, reject)=>{
 
-            let folderRef = this.getFirebaseRef(ref + '/0' + name)
+            let folderRef = this.getFirebaseRef(ref + '/' + name)
 
             folderRef.on('value', snapshot =>{
 
                 folderRef.off('value')
 
-                snapshot.forEach(item=>{
-
-                    let data = item.val()
-                    data.key = item.key
-
-                    if(data.type === 'folder'){
+                if(snapshot.exists()){
+                    
+                    
+                    snapshot.forEach(item=>{
                         
-                        this.removeFolderTask(ref + '/' + name, data.name).then(()=>{
-
+                        let data = item.val()
+                        data.key = item.key
+                        
+                        if(data.mimetype === 'folder'){
+                            
+                        this.removeFolderTask(ref + '/' + name, data.originalFilename).then(()=>{
+                            
                             resolve({fields:{key:data.key}})
                         }).catch(err=>{
                             reject(err)
                         })
 
-                    }else if(data.type){
-                        this.removeFile(ref + '/' + name, data.name).then(()=>{
-
+                    }else if(data.mimetype){
+                        this.removeFile(ref + '/' + name, data.originalFilename).then(()=>{
+                            
                             resolve({fields:{key:data.key}})
                         }).catch(err=>{
                             reject(err)
                         })
                     }
-
+                    
                 })
-
+                
                 folderRef.remove()
+            }else{
+                this.getFirebaseRef('hcode').child(key).remove()
+            }
 
             })
         })
@@ -239,19 +241,29 @@ class DropBoxController {
 
             promises.push(new Promise((resolve,reject) =>{
 
-                if(file.type === 'folder'){
+                if(file.mimetype === 'folder'){
 
-                    this.removeFolderTask(this.currentFolder.join('/'), file.originalFilename).then(()=>{          
+                    this.removeFolderTask(this.currentFolder.join('/'), file.originalFilename, key).then(()=>{          
                         resolve({
                         fields:{key}
                        })
+                    }).catch(err =>{
+
+                        reject(err)
+
                     })
 
-                }else if(file.type){
+                }else if(file.mimetype){
                     this.removeFile(this.currentFolder.join('/'), file.originalFilename).then(()=>{          
                         resolve({
-                        fields:{key}
+                        fields:{
+                            key
+                        }
                        })
+                    }).catch(err =>{
+
+                        reject(err)
+
                     })
 
                 }
@@ -266,7 +278,7 @@ class DropBoxController {
 
     removeFile(ref, name){
 
-        let fileRef = filebase.storage().ref(ref).child(name)
+        let fileRef = firebase.storage().ref(ref).child(name)
 
         return fileRef.delete()
 
@@ -275,9 +287,7 @@ class DropBoxController {
     uploadComplete(){
 
         this.modalShow(false)
-
         this.inputFilesEl.value = ''
-
         this.btnSendFileEl.disabled = false
 
     }
@@ -296,7 +306,7 @@ class DropBoxController {
 
     }
 
-    ajax(url, method = 'GET', formData = new FormData(), onprogress = function(){}, onload = function(){}){
+    ajax(url, method = 'GET', formData = new FormData(), onprogress = function(){}, onloadstart = function(){}){
 
         return new Promise((resolve, reject)=>{
 
@@ -326,7 +336,7 @@ class DropBoxController {
 
             ajax.upload.onprogress = onprogress
 
-            onloadstart
+            onloadstart()
             ajax.send(formData)
 
         })
@@ -345,14 +355,15 @@ class DropBoxController {
 
             promises.push(new Promise((resolve, reject)=>{
 
-                let fileRef  = firebase.storage().ref(this.currentFolder.join('/')).child(file.originalFilename)
-
+                let fileRef  = firebase.storage().ref(this.currentFolder.join('/')).child(file.name)
                 let task = fileRef.put(file)
     
                 task.on('state_changed', snapshot=>{
     
-                    this.uploadProgress({loaded: snapshot.bytesTransferred, total: snapshot.totalBytes}, file)
-                    console.log('progress', snapshot)
+                    this.uploadProgress({
+                        loaded: snapshot.bytesTransferred, 
+                        total: snapshot.totalBytes
+                    }, file)
     
                 }, error => {
                     
@@ -361,7 +372,7 @@ class DropBoxController {
     
                 }, ()=>{
     
-                    fileRef.getMetadata().then(metadata=>{
+                    fileRef.getMetadata().then(metadata =>{
 
                         resolve(metadata)
 
@@ -396,7 +407,6 @@ class DropBoxController {
         this.namefileEl.innerHTML = file.name
         this.timeleftEl.innerHTML = this.formatTimeToHuman(timeleft)
 
-        console.log(timespent,timeleft, porcent)
     }
 
     formatTimeToHuman(duration){
@@ -627,7 +637,7 @@ class DropBoxController {
 
             snapshot.forEach(snapshotItem =>{
 
-                let key = snapshot.key
+                let key = snapshotItem.key
                 let data = snapshotItem.val()
 
                 if(data.mimetype){
@@ -668,7 +678,6 @@ class DropBoxController {
                 span.innerHTML = folderName
 
             }else{
-
 
                 span.className = 'breadcrumb-segment__wrapper'
                 span.innerHTML = `

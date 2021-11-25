@@ -53,7 +53,7 @@ router.delete('/file',(req,res)=>{
 
   form.parse(req, (err, fields, files)=>{
 
-    let path = "./" +fields.path
+    let path = fields.path
 
     if(fs.existsSync(path)) {
 
@@ -62,9 +62,7 @@ router.delete('/file',(req,res)=>{
         if(err){
 
           res.status(400).json({
-
             err
-
           })
 
         }else{
@@ -97,7 +95,6 @@ router.post('/upload', (req,res)=>{
   })
 
   form.parse(req, (err, fields, files)=>{
-
 
     res.json({
       files
